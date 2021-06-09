@@ -1,0 +1,247 @@
+---
+title: "Studying data"
+author: "Melina Ribaud"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Some real data sets}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::knitr}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+## Introduction
+
+In this vignette, we illustrate our package with the two real data sets used in the article https://hal.archives-ouvertes.fr/hal-02936779v3. 
+
+## Install and load package 
+
+### Install packages
+```{r, echo=TRUE, eval=FALSE}
+install.packages("ZIprop")
+install.packages("knitr")
+install.packages("kableExtra")
+install.packages("ggplot2")
+install.packages("ggrepel")
+install.packages("ggthemes")
+install.packages("stringr")
+```
+
+Note that *knitr* and *kableExtra* are used to visualize tables,  *ggplot2*, *ggrepel* and *ggthemes* to plot graphics and *stringr* to manipulate char.
+
+### Load packages
+
+```{r, echo=TRUE, results='asis', warning=FALSE}
+suppressPackageStartupMessages(library(ZIprop))
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(ggrepel)
+library(ggthemes)
+library(stringr)
+```
+
+## Equine Influenza 
+
+We consider an Equine Influenza outbreak in 2003 in race horses from different training yards in Newmarket. 
+In what follows, we use four discrete factors and one continuous factor computed from the observed variables age, sex and training yard:  
+
+  - SameYard: $1$ if the target and contributor are trained in the same yard, $0$ otherwise;
+  - SameSex: $1$ if the target and contributor have the same sex, $0$ otherwise;
+  - DiffAge: $0$ if the target and contributor have the same age, $1$ for a one-year difference and $2$ for more than one year;
+  - DistYard: geographic distance (in km) between the training yards of the target and the contributor;
+  - TransSex: F $\to$ F if a female infected another female, M $\to$ F if a male infected a female, F $\to$ M if a female infected a male and M $\to$ M if a male infected another male.
+  
+The weight is the probability of transmission between horses.  
+
+Some of these factors are missing for some target-contributor pairs. Hence, the tests for assessing the effect of a given factor on the transmission probability are applied on the subset of complete data for this factor. The data set used for this study is available in the package or at this link https://doi.org/10.5281/zenodo.4837560.
+
+### Load the data and summarize them. 
+```{r}
+data(equineDiffFactors)
+summary(equineDiffFactors)
+```
+
+
+### Run permutations test
+
+In this example, only $B=1000$ permutations are used. It is recommended to study the stability of the permutations tests results to choose the best number of permutations. 
+
+```{r}
+res_equine = permDT (
+  equineDiffFactors,
+  ColNameFactor = colnames(equineDiffFactors)[-c(1:3)],
+  B = 1000,
+  nclust = 1,
+  ColNameWeight = "weight",
+  ColNameRecep = "ID.recep",
+  ColNameSource = "ID.source",
+  num_class = "DistYard",
+  other_class = colnames(equineDiffFactors)[-c(1:3,7)],
+  multiple_test = TRUE
+)
+```
+
+Note that all non-numeric factor are specified in the *other_class* option. 
+
+
+### Permutations tests results 
+
+```{r}
+kbl(res_equine$dt[,c(1,2)], caption = "ALL") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Factors SameYard, SameSex, DistYard and TransSe are significantly correlated to the transmission probability whereas DiffAg  is not. 
+
+```{r}
+kbl(res_equine$dt_multi$SameYard[,-c(3:4)], caption = "SameYard") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+The test statistics of SameYard and DistYard being negative, horses trained in the same yard or in nearby yards have a higher chance to be linked by a transmission. This is a clearly intuitive result certainly due to higher contact rate in shared training areas. 
+
+```{r}
+kbl(res_equine$dt_multi$SameSex[,-c(3:4)], caption = "SameSex") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+The statistics of post-hoc univariate tests for factor SameSex is also negative, which means that the virus better circulates between horses with the same sex. 
+
+```{r}
+kbl(res_equine$dt_multi$TransSex[,-c(3:4)], caption = "TransSex") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Moreover, the post-hoc tests on the TransSex modalities show that only the difference between F $\to$ M - M $\to$ M (and M $\to$ F - M $\to$ M when one considers the corrected p-values) are not significant. The results on the p-values and the sign of the statistics show that transmissions between females are favored compared to all other possible combinations (F $\to$ F transmissions have positive probabilities 1.8 times more than expected under complete randomness.
+
+### Performance indicator 
+
+First of all, only the factor that are significant is chosen to compute the performance indicator and all the NA has to be removed from the data set. 
+```{r}
+DT_omitna = na.omit(equineDiffFactors[,c(1:3,4,5,7,8),with=F])
+summary(DT_omitna )
+```
+
+
+max_generations and wait_generations are set to low values because the number of factors is low. It is recommended to increase these values id there is no convergence due for example to a higher number of factor.
+```{r}
+system.time({I_max = indicator_max(
+  DT_omitna,
+  ColNameFactor = colnames(DT_omitna)[-c(1:3)],
+  ColNameWeight = "weight",
+  bounds = c(-10, 10),
+  max_generations = 50,
+  hard_limit = TRUE,
+  wait_generations = 10,
+  other_class = colnames(DT_omitna)[-c(1:3,6)]
+)})
+
+I_max$indicator
+```
+
+The performance indicator takes the value $I_{\hat{{\beta}}}(\mathbb{X},Z)=0.21$ using the four selected factors. This relatively low value, which indicates that there is a moderate correlation between the combination of the four factors and the transmissions, can actually be viewed as quite large given the fact that we only consider very basic factors to \textit{predict} the transmissions. 
+
+
+## Covid-19 
+
+The proba are the mixture probabilities i.e. the similarity between targets (UE countries) and contributors (US and CA states) in terms of mortality dynamics during the first wave of the Covid-19. We consider 29 variables related to economy, demography, health, healthcare system and climate. More precisely, the objective is to identify factors negatively correlated with the response, i.e., the lower the distance between two geographic entities with respect to a given variable, the higher the mixture probability. Consequently, we use the univariate test for continuous factors, which are computed for each target-contributor pair by 
+$x_k^{(i,j)}= |x_k^i - x_k^j|$. The data set used for this study is available in https://doi.org/10.5281/zenodo.4769671.
+
+
+### Load the data and summarize them. 
+```{r}
+data(diffFactors)
+summary(diffFactors)
+```
+
+
+### Run permutations test
+
+In this example, only $B=1000$ permutations are used. It is recommended to study the stability of the permutations tests results to choose the best number of permutations. 
+
+```{r}
+res = permDT (
+  diffFactors,
+  ColNameFactor = colnames(diffFactors)[-c(1:3)],
+  B = 1000,
+  nclust = 1,
+  ColNameWeight = "proba",
+  ColNameRecep = "ID.recep",
+  ColNameSource = "ID.source",
+  multiple_test = TRUE
+)
+```
+
+
+
+### Permutations tests results 
+
+```{r, warning=FALSE, fig.width= 6.5, fig.height= 4}
+res$stat2 = res$stat
+res$stat2[res$pv_neg>0.05] = NA
+res$Factor = str_remove(rownames(res),"_diff")
+res$Factor = factor(res$Factor, levels = res$Factor)
+res$dec = rep(c(0.15,-0.15),50)[1:nrow(res)]
+res$dec[res$pv_neg>0.05] = NA
+
+p = ggplot(res,aes(Factor,pv_neg)) + geom_point(colour = "black") + 
+  ylim(-0.1,1) +
+  xlab("") + 
+  ylab("P-value") +
+  theme_classic() +
+  geom_rangeframe() + 
+  geom_hline(yintercept = 0.05, color ="red") +
+  #geom_text_repel(data = res, aes(label = round(stat2,2)),
+  #                         point.padding = 1)  +
+  geom_label_repel(data = res, aes(label = round(stat2,2)), fill = "white", 
+                   nudge_y = na.omit(res$dec) )+
+  ggtitle("Permutation test results")
+
+p + theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          plot.title = element_text(hjust = 0.5))
+```
+
+
+The figure shows the p-values obtained for each factor and the Spearman's correlation for significant factors. We identified eleven impacting factors: hospibed, smokers, lung, healthexp, gdp_capita, fertility, urbanpop, nurses_per_1K, gdp2019, pop_female_0_14, and pop_tot_0_14. The figure shows that Spearman's correlation is negative for significant factors. This result is consistent with our objective (to identify the significant factors negatively correlated to the response).
+
+### Performance indicator 
+
+Only the factor that are significant is chosen to compute the performance indicator. The computation time it is quite long (around seconds). 
+```{r, eval=FALSE}
+ind_fact_select = which(colnames(diffFactors) %in%  rownames(res[res$pv_neg<0.05,]) )
+
+system.time({I_max = indicator_max(
+  diffFactors,
+  ColNameFactor = colnames(diffFactors)[c(ind_fact_select)],
+  ColNameWeight = "proba",
+  bounds = c(-10, 10),
+  max_generations = 200,
+  hard_limit = TRUE,
+  wait_generations = 50
+)})
+
+I_max$indicator
+```
+
+Then, we applied the multivariate analysis based on the eleven significant factors. The performance indicator is equal to $I_{\hat{{\beta}}}(\mathbb{X},Z)=0.73$, which shows that a high monotonous dependency exists between the mixture probabilities and these factors. 
+
+
+
+
+
+
+
+
+
+
+
